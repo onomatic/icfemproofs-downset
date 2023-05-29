@@ -10,11 +10,12 @@ locale sync_atomic_elem =  sync_semigroup + seq: seq_atomic  +
   assumes seq_atomic_sync: "x \<le> step l s \<Longrightarrow> a \<le> step l' s' \<Longrightarrow>  f (x; y) (a; b) \<le>  f x a ;  f y  b"
   assumes bot_conj_step: " f (step l s)  \<bottom> \<le> \<bottom>"
   assumes sync_step_test: "f (test t) (step l s ; x) \<le> \<bottom>"  
-  assumes step_unit: " unit_of (step l s) \<in> {c.  \<exists>l. c= step l s }"
-
+  assumes conv_merge_step: "x \<le> f (step l s) (step l' s') \<Longrightarrow>
+          \<exists>l'' s''. x \<le> step l'' s'' \<and> step l'' s''  \<le> f (step l s) (step l' s') " 
 
 
 begin
+
 
 lemma test_nonempty[simp]: "\<Down> (range test) \<union> \<Down> {\<bottom>} = \<Down> (range test)"
   by (safe; clarsimp simp: in_down_iff down_image_iff)
@@ -150,6 +151,33 @@ lemma conv_sync_seq_step: "convolute (seq.convolute (seq.datomic q) d) (seq.conv
   apply (safe; clarsimp simp: in_down_iff)
   by (smt (verit) commute fst_conv order_refl order_trans seq_atomic_sync snd_conv)
 
+definition "merge c c' \<equiv> f (step (fst c) (snd c)) ( step (fst c') (snd c'))"
+
+
+
+lemma convolute_step_convolute: "convolute (seq.datomic P) (seq.datomic Q) = 
+      seq.datomic (\<Squnion>p\<in>P. \<Squnion>q\<in>Q. {c. step (fst c) (snd c) \<le> merge p q})"
+  apply (case_tac "P = {}"; case_tac "Q = {}"; clarsimp?)
+     apply (metis conj_conv_atomic_bot seq.step_atomic.atomic.hom_bot)
+     apply (metis conj_conv_atomic_bot)
+  apply (simp add: abel_conv.commute conj_conv_atomic_bot)
+  apply (rule antisym)
+  apply (subst less_eq_downset_def)
+  apply (transfer)
+   apply  (clarsimp simp: mono_on_down  mono_on_SUP mono_on_principle 
+                         mono_on_down' commute nonempty_bot_union' nonempty_bot_union )
+   apply (clarsimp simp: in_down_iff down_image_iff merge_def)
+   apply (metis fst_conv conv_merge_step snd_eqD surj_pair)
+ apply (subst less_eq_downset_def)
+  apply (transfer)
+  apply  (clarsimp simp: mono_on_down mono_on_SUP mono_on_principle mono_on_down' 
+                         commute nonempty_bot_union' nonempty_bot_union )
+  apply (intro conjI)
+   apply (clarsimp simp: in_down_iff down_image_iff merge_def)
+  using dual_order.trans apply fastforce
+  apply (clarsimp)
+  by auto
+
 end
 
 locale cra_atomic_sync = conj_par + par_sync: sync_atomic_elem par to_env + conj_sync: sync_atomic_elem conj unit_of
@@ -158,75 +186,17 @@ locale cra_atomic_elem = cra_elem + seq_atomic +  cra_atomic_sync +
 
   assumes to_env_step: "to_env (step l s ; c) = (step Env s ; to_env c)"
   assumes par_steps: "par (step l s) (step Env s) \<ge> step l s" and
-          par_steps': "par (step l s) (step Env s) \<le> step l s" and
-
+          par_steps': "par (step l s) (step Env s') \<le> step l s" and
+(*
   par_sync: " x \<le> step l s \<parallel> step l' s' \<Longrightarrow> \<not> (x \<le> \<bottom>) \<Longrightarrow> (l = Env \<or> l' = Env) \<and> s = s'" and
 
   step_unit: " (step l s) \<le> unit_of (step l s)" and
-  sync_steps: "conj (step l s) (step l' s') \<le> step l s" and
+  sync_steps: "conj (step l s) (step l' s') \<le> step l s" and *)
 
   no_pgm_env: "x \<le> step Pgm s ; c \<Longrightarrow> x \<le> step Env s' ; d \<Longrightarrow> x \<le> \<bottom>" 
 
 
 begin
-
-lemma conj_convolute_is_inf: "conj.convolute (datomic p) (datomic q) = datomic (p \<inter> q)"
-  apply (case_tac "p = {}"; case_tac "q = {}", clarsimp)
-  apply (simp add: conj_sync.conj_conv_atomic_bot)
-   apply (simp add: conj.conv_sync.sync_commute conj_sync.conj_conv_atomic_bot)
-  apply (rule antisym)
-  apply (subst less_eq_downset_def)
-  apply (transfer)
-  apply  (clarsimp simp: mono_on_down  mono_on_SUP mono_on_principle mono_on_down' conj.commute par_sync.nonempty_bot_union' par_sync.nonempty_bot_union )
-   apply (safe ; clarsimp simp: in_down_iff down_image_iff)
-   apply (metis IntI sync_steps dual_order.trans fst_conv local.conj.commute snd_conv step_meet')
-  apply (subst less_eq_downset_def)
-
- apply (transfer)
-  apply  (clarsimp simp: mono_on_down  mono_on_SUP mono_on_principle mono_on_down' conj.commute par_sync.nonempty_bot_union' par_sync.nonempty_bot_union )
-  apply (safe ; clarsimp simp: in_down_iff down_image_iff)
-   apply (metis fst_conv local.conj.idem snd_conv)
-  apply (blast)
-  done
-
-term datomic
-
-definition "par_defined c c' \<equiv> (fst c = Env \<or> fst c' = Env) \<and> (snd c' = snd c)"
-
-definition "par_merge c c' \<equiv> if fst c = Env then  c' else c"
-
-
-lemma par_convolute_is_inf: "par.convolute (datomic P) (datomic Q) = datomic (\<Squnion>p\<in>P. \<Squnion>q\<in>Q. {c. par_defined p q \<and> c = par_merge p q})"
-  apply (case_tac "P = {}"; case_tac "Q = {}", clarsimp)
-  apply (simp add: sp.seq_par_test.nonabort_sync_top)
-    apply (simp add: par_sync.conj_conv_atomic_bot)
-  apply (simp add: par.conv_sync.sync_commute par_sync.conj_conv_atomic_bot)
-  apply (rule antisym)
-  apply (subst less_eq_downset_def)
-  apply (transfer)
-   apply  (clarsimp simp: mono_on_down  mono_on_SUP mono_on_principle mono_on_down' conj.commute par_sync.nonempty_bot_union' par_sync.nonempty_bot_union )
-   apply (clarsimp simp: in_down_iff down_image_iff)
-   apply (frule (1) par_sync)
-   apply (clarsimp)
-   apply (rule_tac x="(a, aa, b)" in bexI)
-    apply (rule_tac x="(ab, aa, b)" in bexI)
-     apply (intro conjI)
-      apply (clarsimp simp: par_defined_def)
-  apply (elim disjE)
-      apply (clarsimp simp: par_merge_def)
-      apply (metis dual_order.trans par.commute par_steps')
-     apply (clarsimp simp: par_merge_def)
-      apply (metis dual_order.trans par.commute par_steps')
-    apply (clarsimp)+
- apply (subst less_eq_downset_def)
-  apply (transfer)
-  apply  (clarsimp simp: mono_on_down  mono_on_SUP mono_on_principle mono_on_down' conj.commute par_sync.nonempty_bot_union' par_sync.nonempty_bot_union )
-  apply (intro conjI)
-   apply (clarsimp simp: in_down_iff down_image_iff )
-   apply (smt (z3) dual_order.trans par.commute par_defined_def par_merge_def par_steps)
-  apply (clarsimp)
-  by auto
-
 
 
 lemma mono_seq[simp]: "mono_on UNIV (;) "
@@ -362,16 +332,6 @@ notation cs.seq.convolute (infixl \<open>\<Zsemi>\<close> 60 )
 
 lemma in_left: "c \<le> a \<squnion> b \<Longrightarrow> c \<sqinter> b \<le> \<bottom> \<Longrightarrow> c \<le> (a :: 'd :: refinement_lattice)"
   by (simp add: inf.absorb_iff2 inf_commute inf_sup_distrib1)
-
-
-lemma step_conj: "a \<le> step l s \<Longrightarrow> b \<le> step l' s' \<Longrightarrow> a \<iinter> b \<le> a"
-  apply (rule order_trans, rule conj.mono_f[where b="unit_of (step l' s')"], rule order_refl)
-  using step_unit 
-  using dual_order.trans apply blast
-  using conj.down_unit by auto
-
-abbreviation (input) "cong x y \<equiv>  x \<le> y \<and> y \<le> x" 
-
 
 lemma step_test_last: "step l' (x, y) ; test y \<ge> step l' (x, y)"
 
@@ -1193,8 +1153,7 @@ sublocale atomic_conv_conj_seq_elem: conj_atomic cs.seq.convolute cs.seq.conv_te
   apply (standard)
   using conj.conv_idemp apply presburger
   apply (clarsimp)
-         apply (rule_tac x="p \<inter> q" in exI)
-  using conj_convolute_is_inf apply blast
+  using conj_sync.convolute_step_convolute apply blast
         apply (rule antisym)
   using conj.conv_sync.sync_commute conj_sync.conv_sync_seq_step apply presburger
         apply (simp add: cs.exchange_convolute.exchange)
@@ -1202,8 +1161,12 @@ sublocale atomic_conv_conj_seq_elem: conj_atomic cs.seq.convolute cs.seq.conv_te
       defer
       apply (clarsimp simp: step_atomic.Atomic_def, blast)
      apply (clarsimp simp: step_atomic.Atomic_def)
-  using conj_convolute_is_inf 
-     apply (metis Int_UNIV_left)
+     apply (subst conj_sync.convolute_step_convolute)
+     apply (transfer)
+     apply (safe; clarsimp simp: in_down_iff down_image_iff conj_sync.merge_def)
+      apply (smt (verit, ccfv_SIG) conj.covering conj.unit_of_unit conj_sync.bot_conj_step
+                                   dual_order.trans local.conj.idem step_meet')
+  apply (metis fst_conv local.conj.idem order_refl snd_conv)
     apply auto[1]
    apply (subgoal_tac "(seq_elem_fiter.iter step_atomic.Atomic) = gfp llp")
     apply (simp add: llp_is_dunit )
@@ -1223,7 +1186,7 @@ sublocale atomic_conv_par_seq_elem: par_atomic cs.seq.convolute cs.seq.conv_test
   apply (standard)
   using conv_cra.nil_par_nil apply fastforce
   apply (clarsimp)
-  using par_convolute_is_inf apply blast
+  using par_sync.convolute_step_convolute apply blast
         apply (rule antisym)
   using par.conv_sync.sync_commute par_sync.conv_sync_seq_step apply presburger
   apply (simp add: sp.exchange_convolute.exchange)
@@ -1232,16 +1195,13 @@ sublocale atomic_conv_par_seq_elem: par_atomic cs.seq.convolute cs.seq.conv_test
     apply (rule_tac x="{s. fst s = Env}" in exI)
     apply (transfer, safe; clarsimp simp: down_image_iff in_down_iff)
    apply (subst env_is_datomic)
-   apply (subst par_convolute_is_inf, clarsimp)
-   apply (transfer, safe; clarsimp simp: down_image_iff in_down_iff)
-    apply (clarsimp simp: par_defined_def par_merge_def)
-   apply (rule_tac x=aa in exI)
-  apply (rule_tac x=b in exI)
-   apply (rule_tac x="(a, aa, b)" in bexI)
-    apply (intro conjI)
-    apply (clarsimp simp: par_defined_def par_merge_def)
-    apply (clarsimp simp: par_defined_def par_merge_def)
-  apply (clarsimp)
+   apply (subst  par_sync.convolute_step_convolute)
+   apply (transfer, safe; clarsimp simp: down_image_iff in_down_iff  par_sync.merge_def)
+    apply (erule order_trans)
+    apply (erule order_trans)
+  apply (subst par.commute)
+  apply (rule par_steps')
+  apply (metis fst_conv par.commute par_steps snd_conv)
    apply (subgoal_tac "(seq_elem_fiter.iter (datomic_l {Env} UNIV)) = par.dunit")
     apply (simp add: llp_is_dunit )
   apply (rule antisym)
