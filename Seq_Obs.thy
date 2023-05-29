@@ -1,7 +1,7 @@
 theory Seq_Obs
   imports
    Ordered_Semigroups
-  "../rg-algebra/General/Sequential"
+  "rg-algebra/General/Sequential"
 begin
 
 
